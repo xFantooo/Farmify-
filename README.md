@@ -1,6 +1,6 @@
 # 🚜 Farmify
 
-**Advanced Clash of Clans Attack Automation & Optimization Tool**
+**Advanced Clash of Clans Farm bot 2026**
 
 > Automate your attack strategies, save time, and dominate the battlefield.
 
