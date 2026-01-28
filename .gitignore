@@ -46,6 +46,10 @@ public/
 node_modules/
 *.js
 *.py
+*.txt
+*.md
+*.json
+*.spec
 !README.md
 !.gitignore
 
@@ -83,3 +87,8 @@ src/utils/config.py
 /.env
 /release
 /src
+/assets
+/bundled_tesseract
+/TRIAL_KEY.txt
+/TRIAL_KEYS_BATCH.txt
+/.gitattributes
