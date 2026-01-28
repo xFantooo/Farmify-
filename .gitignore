@@ -1,0 +1,85 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# HIDE ALL SOURCE CODE - Only keep README and screenshots
+src/
+electron/
+FarmifyDiscord/
+public/
+node_modules/
+*.js
+*.py
+!README.md
+!.gitignore
+
+# Keep screenshots folder
+!screenshots/
+!screenshots/**
+
+# COC Bot specific
+recordings/
+coordinates/
+templates/
+logs/
+config.json
+license.json
+package.json
+package-lock.json
+
+# Build artifacts
+public/react-build/
+build/
+release/
+*.exe
+*.dmg
+*.zip
+
+# Temporary files
+*.tmp
+.history/
+*.log
+*.bak 
+src/utils/config.py
+/LICENSE.txt
+/license_keys_export.csv
+/generated_keys.json
+/.env
+/release
+/src

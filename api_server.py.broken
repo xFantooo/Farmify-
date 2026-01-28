@@ -1,0 +1,1781 @@
+import os
+import sys
+
+# ============================================================================
+# IMPORT LOGGER EARLY - Before diagnostics
+# ============================================================================
+# We need to import the Logger class early to log startup diagnostics
+startup_logger = None
+try:
+    from src.utils.logger import Logger
+    startup_logger = Logger()
+except Exception as e:
+    try:
+        from utils.logger import Logger
+        startup_logger = Logger()
+    except Exception as e2:
+        # Fallback if Logger can't be imported
+        try:
+            import logging
+            log_dir = os.path.join(os.path.expanduser('~'), 'AppData', 'Local', 'Farmify', 'logs')
+            os.makedirs(log_dir, exist_ok=True)
+            logging.basicConfig(
+                level=logging.DEBUG,
+                format='%(asctime)s - %(levelname)s - %(message)s',
+                filename=os.path.join(log_dir, 'startup.log')
+            )
+            startup_logger = logging.getLogger('startup')
+        except Exception as e3:
+            print(f"[CRITICAL] Could not setup any logger: {e3}")
+            startup_logger = None
+
+# ============================================================================
+# STARTUP DIAGNOSTICS - Wrapped in try-except to prevent crashes
+# ============================================================================
+
+try:
+    if startup_logger:
+        startup_logger.info("="*80)
+        startup_logger.info("FARMIFY API SERVER - STARTUP DIAGNOSTICS")
+        startup_logger.info("="*80)
+        startup_logger.info(f"Frozen: {getattr(sys, 'frozen', False)}")
+        startup_logger.info(f"Executable: {sys.executable}")
+        startup_logger.info(f"CWD: {os.getcwd()}")
+        startup_logger.info("="*80)
+
+    # Diagnostic 1: Check sys.path
+    if startup_logger:
+        startup_logger.info("Checking sys.path for modules...")
+for i, path in enumerate(sys.path[:5]):
+    startup_logger.info(f"  [{i}] {path}")
+
+# Diagnostic 2: Check for app_paths.py
+startup_logger.info("Searching for app_paths.py...")
+found_app_paths = False
+for path in sys.path[:15]:
+    locations_to_check = [
+        (path, 'root'),
+        (os.path.join(path, 'utils'), 'utils/'),
+        (os.path.join(path, 'src', 'utils'), 'src/utils/'),
+    ]
+    
+    for location, desc in locations_to_check:
+        app_paths_py = os.path.join(location, 'app_paths.py')
+        if os.path.isfile(app_paths_py):
+            startup_logger.info(f"  ✅ Found {desc}app_paths.py at: {app_paths_py}")
+            found_app_paths = True
+
+if not found_app_paths:
+    startup_logger.error("  ❌ app_paths.py NOT FOUND ANYWHERE IN sys.path")
+    startup_logger.error("     This is the ROOT CAUSE of [Errno 22] errors!")
+
+# Diagnostic 3: Try to import app_paths
+startup_logger.info("Testing import paths...")
+get_app_data_dir = None
+import_source = None
+
+# Try 1: src.utils.app_paths
+try:
+    from src.utils.app_paths import get_app_data_dir as func1
+    get_app_data_dir = func1
+    import_source = 'src.utils.app_paths'
+    startup_logger.info(f"  ✅ Successfully imported from: {import_source}")
+except Exception as e:
+    startup_logger.warning(f"  ❌ from src.utils.app_paths: {str(e)[:80]}")
+
+# Try 2: utils.app_paths
+if get_app_data_dir is None:
+    try:
+        from utils.app_paths import get_app_data_dir as func2
+        get_app_data_dir = func2
+        import_source = 'utils.app_paths'
+        startup_logger.info(f"  ✅ Successfully imported from: {import_source}")
+    except Exception as e:
+        startup_logger.warning(f"  ❌ from utils.app_paths: {str(e)[:80]}")
+
+# Try 3: app_paths
+if get_app_data_dir is None:
+    try:
+        from app_paths import get_app_data_dir as func3
+        get_app_data_dir = func3
+        import_source = 'app_paths'
+        startup_logger.info(f"  ✅ Successfully imported from: {import_source}")
+    except Exception as e:
+        startup_logger.warning(f"  ❌ from app_paths: {str(e)[:80]}")
+
+# Diagnostic 4: Test the function
+if get_app_data_dir is not None:
+    try:
+        app_data_path = get_app_data_dir()
+        startup_logger.info(f"  ✅ get_app_data_dir() returned: {app_data_path}")
+        startup_logger.info(f"     Is absolute: {os.path.isabs(app_data_path)}")
+        startup_logger.info(f"     Type: {type(app_data_path).__name__}")
+        startup_logger.info(f"     Exists: {os.path.isdir(app_data_path)}")
+    except Exception as e:
+        startup_logger.error(f"  ❌ Failed to call get_app_data_dir(): {e}")
+        get_app_data_dir = None
+else:
+    startup_logger.error("  ❌ ALL IMPORT ATTEMPTS FAILED")
+    startup_logger.error("     ROOT CAUSE: app_paths.py is not available in frozen app")
+    startup_logger.error("     RESULT: Modules will use fallback paths")
+    startup_logger.error("     OUTCOME: [Errno 22] errors expected on file operations")
+
+# Diagnostic 5: Test file operations
+startup_logger.info("Testing file operations...")
+try:
+    test_dir = os.path.join(os.path.expanduser('~'), 'AppData', 'Local', 'Farmify', 'test')
+    os.makedirs(test_dir, exist_ok=True)
+    
+    test_file = os.path.join(test_dir, 'diagnostic_test.txt')
+    test_file = os.path.abspath(test_file)
+    
+    # Try to write
+    with open(test_file, 'w') as f:
+        f.write("diagnostic test")
+    
+    # Try to read
+    with open(test_file, 'r') as f:
+        content = f.read()
+    
+    # Clean up
+    os.remove(test_file)
+    
+    startup_logger.info(f"  ✅ File operations working")
+except Exception as e:
+    startup_logger.error(f"  ❌ File operations failed: {e}")
+    if hasattr(e, 'errno'):
+        startup_logger.error(f"     Errno: {e.errno} (This is what causes the [Errno 22] errors)")
+
+    # Final verdict
+    startup_logger.info("="*80)
+    if get_app_data_dir is not None and import_source is not None:
+        startup_logger.info("✅ DIAGNOSTICS PASSED - app_paths imported successfully")
+        startup_logger.info(f"   Import source: {import_source}")
+    else:
+        startup_logger.critical("❌ DIAGNOSTICS FAILED - app_paths import unsuccessful")
+        startup_logger.critical("   [Errno 22] errors will occur when trying to save files")
+    startup_logger.info("="*80)
+
+except Exception as e:
+    # Diagnostics failed - but don't crash the app
+    print(f"[CRITICAL] Startup diagnostics failed: {e}")
+    import traceback
+    traceback.print_exc()
+    if startup_logger:
+        try:
+            startup_logger.error(f"[CRITICAL] Startup diagnostics crashed: {e}")
+            startup_logger.error(traceback.format_exc())
+        except:
+            pass
+
+# ============================================================================
+# END STARTUP DIAGNOSTICS
+# ============================================================================
+
+"""
+Flask API Server - Bridge between Electron UI and Farmify
+Exposes bot functionality through REST endpoints
+"""
+
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import json
+import requests
+from datetime import datetime
+
+startup_logger.info("Starting Flask API server initialization...")
+
+# CRITICAL: Run diagnostic if frozen
+is_frozen = getattr(sys, 'frozen', False)
+if is_frozen:
+    print("[API_SERVER] ⚠️ FROZEN APP DETECTED - Running diagnostics...")
+    try:
+        from src.utils.frozen_diagnostic import diagnose_frozen_context
+        diagnose_frozen_context()
+    except ImportError:
+        try:
+            from utils.frozen_diagnostic import diagnose_frozen_context
+            diagnose_frozen_context()
+        except ImportError as e:
+            print(f"[API_SERVER] ⚠️ Could not load diagnostic: {e}")
+
+# CRITICAL: Initialize app paths FIRST before any imports that use paths
+print("[API_SERVER] Attempting to initialize app paths...")
+try:
+    try:
+        from src.utils.app_paths import initialize_app_paths
+        print("[API_SERVER] ✅ Imported initialize_app_paths from src.utils.app_paths")
+    except ImportError:
+        from utils.app_paths import initialize_app_paths
+        print("[API_SERVER] ✅ Imported initialize_app_paths from utils.app_paths")
+    
+    initialize_app_paths()
+    print("[API_SERVER] ✅ App paths initialized successfully")
+except Exception as e:
+    print(f"[API_SERVER] ⚠️ Warning: Could not initialize app paths: {e}")
+
+from src.bot_controller import BotController
+from src.utils.license_manager import LicenseManager
+from src.utils.paypal_config import PayPalConfig
+from src.utils.transaction_logger import TransactionLogger
+from src.utils.email_notifier import EmailNotifier
+from src.utils.security_hardening import add_security_headers, rate_limit, payment_rate_limiter, input_validator
+
+# Force UTF-8 encoding for Windows console
+if sys.platform == 'win32':
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
+app = Flask(__name__)
+CORS(app)
+
+# Add security headers to all responses
+add_security_headers(app)
+
+# Print to console to confirm terminal output is working
+print("=" * 80)
+print("Farmify API SERVER STARTING")
+print("=" * 80)
+print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+print("Initializing bot controller and managers...")
+print("=" * 80)
+
+# Use the logger created during startup diagnostics
+logger = startup_logger
+logger.info("✅ Using startup logger instance")
+
+try:
+    logger.info("Creating BotController...")
+    bot = BotController(logger=logger)
+    logger.info("✅ BotController created successfully")
+except Exception as e:
+    logger.error(f"❌ CRITICAL ERROR initializing BotController: {type(e).__name__}: {str(e)}", exc_info=True)
+    print(f"❌ CRITICAL ERROR initializing BotController: {type(e).__name__}: {str(e)}")
+    import traceback
+    traceback.print_exc()
+    raise
+
+try:
+    license_manager = LicenseManager()
+    paypal_config = PayPalConfig()
+    transaction_logger = TransactionLogger()
+    email_notifier = EmailNotifier()
+except Exception as e:
+    logger.error(f"Error initializing managers: {type(e).__name__}: {str(e)}", exc_info=True)
+    print(f"Error initializing managers: {type(e).__name__}: {str(e)}")
+
+logger.info("Initialization complete! App ready to handle requests")
+print("=" * 80)
+print()
+
+# Store bot state
+bot_state = {
+    'is_running': False,
+    'is_auto_attacking': False,
+    'is_recording': False,
+    'current_recording': None,
+}
+
+
+# ============================================================================
+# STATUS & STATS ENDPOINTS
+# ============================================================================
+
+@app.route('/api/status', methods=['GET'])
+def get_status():
+    """Get current bot status"""
+    try:
+        is_auto_attacking = bot.is_auto_attacking()
+        is_recording = bot_state['is_recording']
+        is_wall_upgrading = bot.is_wall_upgrader_running()
+        
+        # Determine status and mode for frontend
+        if is_auto_attacking:
+            status = 'running'
+            mode = 'auto_attack'
+        elif is_wall_upgrading:
+            status = 'running'
+            mode = 'wall_upgrader'
+        elif is_recording:
+            status = 'stopped'  # Recording is not a "running" bot mode
+            mode = 'recording'
+        else:
+            status = 'stopped'
+            mode = None
+        
+        return jsonify({
+            'status': status,
+            'mode': mode,
+            'is_running': is_auto_attacking or is_wall_upgrading,
+            'is_auto_attacking': is_auto_attacking,
+            'is_recording': is_recording,
+            'is_wall_upgrading': is_wall_upgrading,
+            'current_recording': bot_state['current_recording'],
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Error getting status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/stats', methods=['GET'])
+def get_stats():
+    """Get bot statistics - returns accumulated stats even when bot is not running"""
+    try:
+        # Always get stats from auto_attacker, whether running or not
+        # This ensures accumulated stats persist until app closes
+        stats = bot.get_auto_attack_stats()
+        return jsonify(stats)
+    except Exception as e:
+        logger.error(f"Error getting stats: {e}")
+        return jsonify({
+            'is_running': False,
+            'total_attacks': 0,
+            'successful_attacks': 0,
+            'failed_attacks': 0,
+            'success_rate': 0,
+            'runtime_hours': 0,
+            'attacks_per_hour': 0,
+            'last_attack': 'N/A',
+            'configured_sessions': []
+        }), 500
+
+
+# ============================================================================
+# AUTO ATTACK ENDPOINTS
+# ============================================================================
+
+@app.route('/api/auto-attack/start', methods=['POST'])
+def start_auto_attack():
+    """Start auto attack system"""
+    try:
+        data = request.get_json()
+        
+        # FIRST: Validate coordinates are properly mapped before starting
+        coords = bot.get_mapped_coordinates()
+        required_buttons = ['attack', 'find_a_match', 'launch_attack', 'next_button', 'end_battle', 'confirm', 'return_home']
+        
+        missing_buttons = []
+        invalid_buttons = []
+        
+        for button in required_buttons:
+            if button not in coords:
+                missing_buttons.append(button)
+            elif not coords[button] or 'x' not in coords[button] or 'y' not in coords[button]:
+                invalid_buttons.append(button)
+        
+        if missing_buttons or invalid_buttons:
+            error_msg = ""
+            if missing_buttons:
+                error_msg += f"Missing button mappings: {missing_buttons}. "
+            if invalid_buttons:
+                error_msg += f"Invalid button coordinates: {invalid_buttons}. "
+            error_msg += "Please map all buttons in Coordinate Mapper before starting auto attack."
+            
+            logger.error(f"[AUTO ATTACK] Validation failed: {error_msg}")
+            print(f"[AUTO ATTACK] COORDINATES STATUS:")
+            for button, coord in coords.items():
+                status = "✅ VALID" if (coord and 'x' in coord and 'y' in coord) else "❌ INVALID"
+                print(f"  {button}: {coord} [{status}]")
+            
+            return jsonify({
+                'error': error_msg,
+                'missing': missing_buttons,
+                'invalid': invalid_buttons,
+                'coordinates': coords
+            }), 400
+        
+        logger.info("[AUTO ATTACK] ✅ All button coordinates validated successfully")
+        print(f"[AUTO ATTACK] COORDINATES STATUS (VALID):")
+        for button, coord in coords.items():
+            print(f"  ✅ {button}: ({coord['x']}, {coord['y']})")
+        
+
+        # Extract attack sessions list
+        attacks = data.get('attacks', [])
+        buttons_sequence = data.get('buttons_sequence', [])
+        
+        if not buttons_sequence:
+            return jsonify({'error': 'No buttons configured - map buttons in Coordinate Mapper first'}), 400
+        
+        # Extract loot management parameters
+        enable_loot_check = data.get('enable_loot_check', False)
+        min_gold = data.get('min_loot_gold', 500000)
+        min_elixir = data.get('min_loot_elixir', 500000)
+        min_dark_elixir = data.get('min_loot_dark_elixir', 0)
+        attack_interval = data.get('attack_interval', 30)
+        battle_duration = data.get('battle_duration', 180)
+        
+        # Log the request for debugging
+        logger.info("="*80)
+        logger.info("[AUTO ATTACK START] ============== REQUEST RECEIVED ==============")
+        logger.info("="*80)
+        
+        # Sanitize attack names for safe logging
+        import re
+        sanitized_attacks = []
+        for attack in attacks:
+            if attack:
+                sanitized = re.sub(r'[<>:"/\\|?*]', '', str(attack))
+                sanitized = sanitized.encode('ascii', 'ignore').decode('ascii')
+                sanitized_attacks.append(sanitized)
+        
+        logger.info(f"[AUTO ATTACK] Attacks array: {sanitized_attacks}")
+        logger.info(f"[AUTO ATTACK] Buttons sequence: {buttons_sequence}")
+        logger.info(f"[AUTO ATTACK] Enable loot check: {enable_loot_check}")
+        logger.info(f"[AUTO ATTACK] Min Gold: {min_gold:,}, Min Elixir: {min_elixir:,}, Min Dark: {min_dark_elixir:,}")
+        logger.info(f"[AUTO ATTACK] Attack interval: {attack_interval}s, Battle duration: {battle_duration}s")
+        logger.info("="*80)
+        
+        
+        # VIP FEATURE CHECK: Validate loot management access
+        if enable_loot_check:
+            # Check if user has VIP license with loot management feature
+            has_loot_access = license_manager.has_feature_access('auto_attack_loot_management')
+            
+            if not has_loot_access:
+                logger.warning("User attempted to use loot management without VIP license")
+                return jsonify({
+                    'error': 'Loot Management is a VIP-only feature. Please upgrade to VIP to use this feature.',
+                    'vip_required': True
+                }), 403
+            
+            logger.info(f"VIP user starting auto attack WITH LOOT CHECKING (min_gold={min_gold}, min_elixir={min_elixir})")
+        else:
+            # Free user - basic auto attack without loot management
+            logger.info("Starting basic auto attack WITHOUT LOOT CHECKING")
+            # Force disable loot parameters for free users
+            min_gold = 0
+            min_elixir = 0
+            min_dark_elixir = 0
+        
+        # Start auto attack with the enable_loot_check flag
+        bot.start_auto_attack(attacks, min_gold, min_elixir, min_dark_elixir, 
+                            buttons_sequence, attack_interval, battle_duration, enable_loot_check)
+        bot_state['is_auto_attacking'] = True
+        
+        logger.info(f"Auto attack started with buttons: {buttons_sequence}")
+        return jsonify({'success': True, 'message': 'Auto attack started'})
+        
+    except Exception as e:
+        logger.error(f"Error starting auto attack: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/auto-attack/stop', methods=['POST'])
+def stop_auto_attack():
+    """Stop auto attack system with improved error handling"""
+    try:
+        bot.stop_auto_attack()
+        bot_state['is_auto_attacking'] = False
+        
+        logger.info("Auto attack stopped")
+        return jsonify({'success': True, 'message': 'Auto attack stopped'})
+        
+    except Exception as e:
+        # Log the error but still update the state
+        logger.error(f"Error stopping auto attack: {e}")
+        
+        # Force update state even if stop failed
+        # (the process might have already terminated)
+        bot_state['is_auto_attacking'] = False
+        
+        # Return success since we've updated the state
+        return jsonify({
+            'success': True, 
+            'message': 'Auto attack stopped',
+            'note': 'Process may have already terminated'
+        })
+
+
+# ============================================================================
+# ATTACK RECORDING & PLAYBACK ENDPOINTS
+# ============================================================================
+
+@app.route('/api/attacks/recorded', methods=['GET'])
+def get_recorded_attacks():
+    """Get list of recorded attacks"""
+    try:
+        logger.info("[API] Getting recorded attacks...")
+        attacks = bot.list_recorded_attacks()
+        logger.info(f"[API] Got {len(attacks)} attacks")
+        
+        # Sanitize attack names for safe JSON return and logging
+        cleaned_attacks = []
+        for attack in attacks:
+            try:
+                # Sanitize the attack name - remove/replace invalid characters
+                import re
+                # Remove invalid Windows characters
+                sanitized = re.sub(r'[<>:"/\\|?*]', '', attack)
+                # Remove accents and non-ASCII
+                sanitized = sanitized.encode('ascii', 'ignore').decode('ascii')
+                sanitized = ' '.join(sanitized.split())  # Clean up spaces
+                
+                cleaned_attacks.append(sanitized)
+                # Log the sanitized version only
+                logger.info(f"[API] Attack: {sanitized}")
+            except Exception as e:
+                logger.error(f"[API] Error processing attack name: {e}, skipping")
+        
+        result = {'attacks': cleaned_attacks}
+        logger.info(f"[API] Returning {len(cleaned_attacks)} attacks")
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"[API] Error getting recorded attacks: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/attacks/delete', methods=['POST'])
+def delete_recorded_attack():
+    """Delete a recorded attack"""
+    try:
+        data = request.get_json()
+        attack_name = data.get('attack_name', '')
+        
+        if not attack_name:
+            return jsonify({'error': 'No attack name provided'}), 400
+        
+        result = bot.delete_recorded_attack(attack_name)
+        if result:
+            return jsonify({'success': True, 'message': f'Attack "{attack_name}" deleted successfully'})
+        else:
+            return jsonify({'error': f'Failed to delete attack "{attack_name}"'}), 400
+    except Exception as e:
+        logger.error(f"Error deleting recorded attack: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/recording/start', methods=['POST'])
+def start_recording():
+    """Start recording an attack"""
+    try:
+        data = request.get_json()
+        name = data.get('name', '')
+        
+        # Sanitize the name before logging
+        import re
+        safe_name = re.sub(r'[<>:"/\\|?*]', '', name)
+        safe_name = safe_name.encode('ascii', 'ignore').decode('ascii')
+        
+        logger.info(f"[RECORDING] Start recording request received: name='{safe_name}'")
+        
+        if not name:
+            logger.error("[RECORDING] No name provided")
+            return jsonify({'error': 'Recording name is required'}), 400
+        
+        # Call the correct method name from BotController
+        logger.info(f"[RECORDING] Calling bot.start_attack_recording('{safe_name}')")
+        bot.start_attack_recording(name)
+        bot_state['is_recording'] = True
+        bot_state['current_recording'] = name
+        
+        logger.info(f"[RECORDING] Recording started successfully: {safe_name}")
+        return jsonify({'success': True, 'message': f'Recording started: {name}'})
+        
+    except Exception as e:
+        logger.error(f"[RECORDING] ❌ Error starting recording: {e}")
+        import traceback
+        logger.error(f"[RECORDING] Traceback: {traceback.format_exc()}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/recording/stop', methods=['POST'])
+def stop_recording():
+    """Stop recording an attack"""
+    try:
+        recording_name = bot_state.get('current_recording', 'Unknown')
+        logger.info(f"Stop recording request for: {recording_name}")
+        
+        # FIXED: Use stop_attack_recording instead of stop_recording
+        bot.stop_attack_recording()
+        bot_state['is_recording'] = False
+        bot_state['current_recording'] = None
+        
+        logger.info(f"Recording stopped successfully: {recording_name}")
+        return jsonify({'success': True, 'message': f'Recording saved: {recording_name}'})
+        
+    except Exception as e:
+        logger.error(f"❌ Error stopping recording: {e}")
+        # Reset state even on error
+        bot_state['is_recording'] = False
+        bot_state['current_recording'] = None
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/attacks/play', methods=['POST'])
+def play_attack():
+    """Play a recorded attack"""
+    try:
+        data = request.get_json()
+        attack_name = data.get('name', '')
+        
+        if not attack_name:
+            return jsonify({'error': 'Attack name is required'}), 400
+        
+        bot.play_attack(attack_name)
+        logger.info(f"Playing attack: {attack_name}")
+        return jsonify({'success': True, 'message': f'Playing: {attack_name}'})
+        
+    except Exception as e:
+        logger.error(f"Error playing attack: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# SCREENSHOT ENDPOINTS
+# ============================================================================
+
+@app.route('/api/screenshots', methods=['GET'])
+def get_screenshots():
+    """Get list of screenshots"""
+    try:
+        # Use centralized path management for consistency
+        from src.utils.app_paths import get_screenshots_dir
+        screenshots_dir = get_screenshots_dir()
+        logger.info(f"[API] Reading screenshots from: {screenshots_dir}")
+        
+        if os.path.exists(screenshots_dir):
+            screenshots = [f for f in os.listdir(screenshots_dir) if f.endswith(('.png', '.jpg', '.jpeg', '.gif'))]
+            logger.info(f"[API] Found {len(screenshots)} screenshots in {screenshots_dir}")
+        else:
+            logger.warning(f"[API] Screenshots directory does not exist: {screenshots_dir}")
+            screenshots = []
+        
+        return jsonify({'screenshots': screenshots})
+    except Exception as e:
+        logger.error(f"[API] Error getting screenshots: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/screenshots/capture', methods=['POST'])
+def capture_screenshot():
+    """Capture a new screenshot"""
+    try:
+        logger.info("[API] Screenshot capture requested")
+        result = bot.take_screenshot()
+        # Sanitize result path before logging (in case it has problematic characters)
+        try:
+            safe_result = result.encode('utf-8', errors='replace').decode('utf-8') if result else "None"
+            logger.info(f"[API] Screenshot captured: {safe_result}")
+        except:
+            logger.info("[API] Screenshot captured successfully")
+        return jsonify({'success': True, 'message': 'Screenshot captured', 'data': result})
+    except Exception as e:
+        logger.error(f"[API] Error capturing screenshot: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# SETTINGS ENDPOINTS
+# ============================================================================
+
+@app.route('/api/settings', methods=['GET'])
+def get_settings():
+    """Get bot settings"""
+    try:
+        from src.utils.config import Config
+        config = Config()
+        settings = config.get_all_settings()
+        return jsonify(settings)
+    except Exception as e:
+        logger.error(f"Error getting settings: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/settings', methods=['PUT'])
+def update_settings():
+    """Update bot settings"""
+    try:
+        data = request.get_json()
+        from src.utils.config import Config
+        config = Config()
+        config.update_settings(data)
+        logger.info(f"Settings updated: {data}")
+        return jsonify({'success': True, 'message': 'Settings updated'})
+    except Exception as e:
+        logger.error(f"Error updating settings: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# LOGS ENDPOINTS
+# ============================================================================
+
+@app.route('/api/logs', methods=['GET'])
+def get_logs():
+    """Get recent logs"""
+    try:
+        logs = logger.get_recent_logs(limit=100)
+        return jsonify({'logs': logs})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/logs/clear', methods=['POST'])
+def clear_logs():
+    """Clear all logs"""
+    try:
+        success = logger.clear_logs()
+        if success:
+            return jsonify({'success': True, 'message': 'Logs cleared'})
+        else:
+            return jsonify({'error': 'Failed to clear logs'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# WALL UPGRADER ENDPOINTS
+# ============================================================================
+
+@app.route('/api/wall-upgrader/start', methods=['POST'])
+def start_wall_upgrader():
+    """Start automated wall upgrading"""
+    try:
+        data = request.get_json()
+        
+        # VIP FEATURE CHECK
+        has_wall_access = license_manager.has_feature_access('wall_upgrader')
+        if not has_wall_access:
+            logger.warning("User attempted to use Wall Upgrader without VIP license")
+            return jsonify({
+                'error': 'Wall Upgrader is a VIP-only feature. Please upgrade to VIP to use this feature.',
+                'vip_required': True
+            }), 403
+        
+        # Extract configuration
+        wall_upgrade_interval = data.get('wall_upgrade_interval', 2)
+        walls_per_upgrade = data.get('walls_per_upgrade', 3)
+        attacks_per_upgrade_cycle = data.get('attacks_per_upgrade_cycle', 10)
+        auto_collect_resources = data.get('auto_collect_resources', True)
+        preferred_resource = data.get('preferred_resource', 'gold')
+        stop_when_resources_low = data.get('stop_when_resources_low', True)
+        min_gold_reserve = data.get('min_gold_reserve', 100000)
+        min_elixir_reserve = data.get('min_elixir_reserve', 100000)
+        
+        # LOOT MANAGEMENT FOR ATTACK CYCLE (separate from Auto Attack)
+        enable_loot_check = data.get('enable_loot_check', False)
+        min_loot_gold = data.get('min_loot_gold', 500000)
+        min_loot_elixir = data.get('min_loot_elixir', 500000)
+        min_loot_dark = data.get('min_loot_dark', 0)
+        attack_sessions = data.get('attack_sessions', [])
+        
+        logger.info(f"Starting Wall Upgrader: resource={preferred_resource}, "
+                   f"attacks_per_cycle={attacks_per_upgrade_cycle}, walls_per_upgrade={walls_per_upgrade}")
+        if enable_loot_check:
+            logger.info(f"Wall Upgrader LOOT CHECK enabled: Gold≥{min_loot_gold:,}, Elixir≥{min_loot_elixir:,}, Dark≥{min_loot_dark:,}")
+        
+        # Start wall upgrader with loot parameters
+        bot.start_wall_upgrader(
+            wall_upgrade_interval=wall_upgrade_interval,
+            walls_per_upgrade=walls_per_upgrade,
+            auto_collect_resources=auto_collect_resources,
+            preferred_resource=preferred_resource,
+            stop_when_resources_low=stop_when_resources_low,
+            min_gold_reserve=min_gold_reserve,
+            min_elixir_reserve=min_elixir_reserve,
+            attacks_per_upgrade_cycle=attacks_per_upgrade_cycle,
+            min_loot_gold=min_loot_gold,
+            min_loot_elixir=min_loot_elixir,
+            min_loot_dark=min_loot_dark,
+            loot_check_enabled=enable_loot_check,
+            attack_sessions=attack_sessions
+        )
+        
+        bot_state['wall_upgrader_running'] = True
+        
+        return jsonify({'success': True, 'message': 'Wall Upgrader started'})
+        
+    except Exception as e:
+        logger.error(f"Error starting wall upgrader: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/wall-upgrader/stop', methods=['POST'])
+def stop_wall_upgrader():
+    """Stop wall upgrading automation"""
+    try:
+        bot.stop_wall_upgrader()
+        bot_state['wall_upgrader_running'] = False
+        
+        logger.info("Wall Upgrader stopped")
+        return jsonify({'success': True, 'message': 'Wall Upgrader stopped'})
+        
+    except Exception as e:
+        logger.error(f"Error stopping wall upgrader: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/wall-upgrader/stats', methods=['GET'])
+def get_wall_upgrader_stats():
+    """Get wall upgrader statistics"""
+    try:
+        stats = bot.get_wall_upgrader_stats()
+        return jsonify(stats)
+    except Exception as e:
+        logger.error(f"Error getting wall upgrader stats: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/wall-upgrader/status', methods=['GET'])
+def get_wall_upgrader_status():
+    """Get wall upgrader running status"""
+    try:
+        is_running = bot.is_wall_upgrader_running()
+        return jsonify({'is_running': is_running})
+    except Exception as e:
+        logger.error(f"Error getting wall upgrader status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# COORDINATE MAPPER ENDPOINTS
+# ============================================================================
+
+@app.route('/api/coordinates', methods=['GET'])
+def get_coordinates():
+    """Get all mapped coordinates"""
+    try:
+        coordinates = bot.get_mapped_coordinates()
+        return jsonify({
+            'coordinates': coordinates,
+            'success': True
+        })
+    except Exception as e:
+        logger.error(f"Error getting coordinates: {e}")
+        return jsonify({
+            'coordinates': {},
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/coordinates', methods=['POST'])
+def save_coordinates():
+    """Save button coordinates"""
+    try:
+        data = request.get_json()
+        name = data.get('name', '')
+        coordinates = data.get('coordinates', {})
+        
+        logger.info(f"[COORDINATE SAVE] Received request for button: {name}")
+        logger.info(f"[COORDINATE SAVE] Raw coordinates data: {coordinates}")
+        
+        if not name:
+            logger.error("[COORDINATE SAVE] ERROR: Button name is required")
+            return jsonify({'error': 'Button name is required'}), 400
+        
+        if not coordinates:
+            logger.error("[COORDINATE SAVE] ERROR: Coordinates are required")
+            return jsonify({'error': 'Coordinates are required'}), 400
+        
+        x = coordinates.get('x')
+        y = coordinates.get('y')
+        
+        logger.info(f"[COORDINATE SAVE] Button: {name}")
+        logger.info(f"[COORDINATE SAVE] X: {x}")
+        logger.info(f"[COORDINATE SAVE] Y: {y}")
+        logger.info(f"[COORDINATE SAVE] Type X: {type(x)}, Type Y: {type(y)}")
+        
+        bot.save_coordinates(name, coordinates)
+        
+        logger.info(f"[COORDINATE SAVE] ✅ Successfully saved coordinates for {name}: ({x}, {y})")
+        return jsonify({'success': True, 'message': f'Coordinates saved for {name}'})
+        
+    except Exception as e:
+        logger.error(f"[COORDINATE SAVE] ERROR: {str(e)}")
+        logger.error(f"[COORDINATE SAVE] Full request data: {request.get_json()}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/coordinates/capture', methods=['POST'])
+def capture_coordinates():
+    """Capture global mouse click coordinates from game window"""
+    try:
+        from src.utils.mouse_listener import capture_click
+        
+        data = request.get_json()
+        button_name = data.get('button_name', 'Unknown')
+        
+        logger.info(f"Starting global mouse listener for {button_name}...")
+        
+        try:
+            # Wait for mouse click (30 second timeout)
+            coordinates = capture_click(timeout=30)
+        except OSError as e:
+            # Handle Windows-specific errors (Errno 22 and others)
+            if e.errno == 22:
+                logger.error(f"[Errno 22] Invalid argument - pynput mouse listener failed")
+                logger.error(f"This may be due to Windows 11 compatibility issues")
+                return jsonify({
+                    'error': 'Mouse listener error (Errno 22)',
+                    'message': 'The mouse listener encountered a system error. Please try again or restart the application.',
+                    'details': str(e)
+                }), 500
+            else:
+                raise
+        
+        if coordinates:
+            logger.info(f"Captured coordinates for {button_name}: {coordinates}")
+            return jsonify({
+                'success': True,
+                'coordinates': coordinates,
+                'message': f'Captured {button_name} at ({coordinates["x"]}, {coordinates["y"]})'
+            })
+        else:
+            logger.warning(f"No coordinates captured for {button_name} - timeout reached")
+            return jsonify({
+                'error': 'No click captured - timeout reached',
+                'message': 'Please try again and click on the button within 30 seconds'
+            }), 408
+        
+    except ImportError as e:
+        logger.error(f"Failed to import mouse_listener: {e}")
+        return jsonify({'error': f'Mouse listener module not available: {str(e)}'}), 500
+    except Exception as e:
+        logger.error(f"Error capturing coordinates: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return jsonify({'error': f'Failed to capture coordinates: {str(e)}'}), 500
+
+
+@app.route('/api/coordinates/<button_name>', methods=['DELETE'])
+def delete_coordinates(button_name):
+    """Delete button coordinates"""
+    try:
+        result = bot.delete_coordinate(button_name)
+        
+        if result:
+            logger.info(f"Coordinates deleted for {button_name}")
+            return jsonify({'success': True, 'message': f'Coordinates deleted for {button_name}'})
+        else:
+            return jsonify({'error': f'Button {button_name} not found'}), 404
+        
+    except Exception as e:
+        logger.error(f"Error deleting coordinates: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/coordinates/<button_name>', methods=['PUT'])
+def update_coordinates(button_name):
+    """Update existing button coordinates"""
+    try:
+        data = request.get_json()
+        x = data.get('x')
+        y = data.get('y')
+        
+        logger.info(f"[COORDINATE UPDATE] Button: {button_name}")
+        logger.info(f"[COORDINATE UPDATE] New X: {x}, New Y: {y}")
+        logger.info(f"[COORDINATE UPDATE] Type X: {type(x)}, Type Y: {type(y)}")
+        
+        if x is None or y is None:
+            logger.error(f"[COORDINATE UPDATE] ERROR: Both x and y coordinates required")
+            return jsonify({'error': 'Both x and y coordinates required'}), 400
+        
+        bot.update_coordinate(button_name, x, y)
+        logger.info(f"[COORDINATE UPDATE] ✅ Successfully updated {button_name}: ({x}, {y})")
+        return jsonify({'success': True, 'message': f'Coordinates updated for {button_name}'})
+        
+    except Exception as e:
+        logger.error(f"[COORDINATE UPDATE] ERROR: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/coordinates/required', methods=['GET'])
+def get_required_buttons():
+    """Get list of required button mappings with descriptions"""
+    try:
+        required_buttons = bot.coordinate_mapper.get_required_buttons()
+        return jsonify({'buttons': required_buttons})
+    except Exception as e:
+        logger.error(f"Error getting required buttons: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# HEALTH CHECK
+# ============================================================================
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Health check endpoint"""
+    return jsonify({
+        'status': 'ok',
+        'timestamp': datetime.now().isoformat(),
+        'bot_running': bot_state['is_running']
+    })
+
+
+# ============================================================================
+# LOOT MANAGEMENT ENDPOINTS
+# ============================================================================
+
+@app.route('/api/loot/config', methods=['GET'])
+def get_loot_config():
+    """Get loot configuration"""
+    try:
+        config = bot.get_loot_config()
+        return jsonify({'config': config})
+    except Exception as e:
+        logger.error(f"Error getting loot config: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/loot/config', methods=['POST'])
+def save_loot_config():
+    """Save loot configuration"""
+    try:
+        data = request.get_json()
+        config = data.get('config', {})
+        
+        if bot.save_loot_config(config):
+            return jsonify({'success': True, 'message': 'Loot configuration saved'})
+        else:
+            return jsonify({'error': 'Failed to save loot configuration'}), 400
+    except Exception as e:
+        logger.error(f"Error saving loot config: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/loot/check', methods=['POST'])
+def check_loot():
+    """Check if loot meets requirements"""
+    try:
+        result = bot.check_loot()
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error checking loot: {e}")
+        return jsonify({'error': str(e), 'has_sufficient_loot': True}), 500
+
+
+@app.route('/api/loot/history', methods=['GET'])
+def get_loot_history():
+    """Get loot check history"""
+    try:
+        history = bot.get_loot_history()
+        return jsonify({'history': history})
+    except Exception as e:
+        logger.error(f"Error getting loot history: {e}")
+        return jsonify({'error': str(e), 'history': []}), 500
+
+
+@app.route('/api/loot/history', methods=['DELETE'])
+def clear_loot_history():
+    """Clear loot history"""
+    try:
+        bot.clear_loot_history()
+        return jsonify({'success': True, 'message': 'Loot history cleared'})
+    except Exception as e:
+        logger.error(f"Error clearing loot history: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# LICENSE / VIP ENDPOINTS
+# ============================================================================
+
+@app.route('/api/license/status', methods=['GET'])
+def get_license_status():
+    """Get current VIP license status"""
+    try:
+        status = license_manager.get_license_status()
+        return jsonify(status)
+    except Exception as e:
+        logger.error(f"Error getting license status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/license/activate', methods=['POST'])
+def activate_license():
+    """Activate a VIP license"""
+    try:
+        data = request.get_json()
+        license_key = data.get('license_key')
+        plan = data.get('plan', 'monthly')
+        
+        if not license_key:
+            return jsonify({'success': False, 'error': 'License key is required'}), 400
+        
+        logger.info(f"Attempting to activate license: {license_key[:20]}...")
+        
+        try:
+            result = license_manager.activate_license(license_key, plan)
+        except OSError as e:
+            if e.errno == 22:
+                logger.error(f"[Errno 22] Invalid argument - license save failed")
+                logger.error(f"This is usually a file path issue. License file: {license_manager.license_file}")
+                return jsonify({
+                    'success': False,
+                    'error': 'License activation failed - file write error (Errno 22)',
+                    'details': 'Please restart the application and try again'
+                }), 500
+            else:
+                raise
+        
+        if result.get('success'):
+            logger.info(f"VIP license activated: {plan} plan")
+            return jsonify(result)
+        else:
+            logger.warning(f"License activation failed: {result.get('error')}")
+            return jsonify(result), 400
+            
+    except Exception as e:
+        logger.error(f"Error activating license: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/license/deactivate', methods=['POST'])
+def deactivate_license():
+    """Deactivate VIP license"""
+    try:
+        try:
+            success = license_manager.deactivate_license()
+        except OSError as e:
+            if e.errno == 22:
+                logger.error(f"[Errno 22] Invalid argument - license file error")
+                logger.error(f"File path may have invalid characters: {license_manager.license_file}")
+                return jsonify({
+                    'success': False,
+                    'error': 'License file error (Errno 22)',
+                    'details': 'File write failed - please restart the application'
+                }), 500
+            else:
+                raise
+        
+        if success:
+            logger.info("VIP license deactivated")
+            return jsonify({'success': True, 'message': 'License deactivated'})
+        else:
+            logger.warning("License deactivation returned False")
+            return jsonify({'success': False, 'error': 'Failed to deactivate'}), 500
+    except Exception as e:
+        logger.error(f"Error deactivating license: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/license/check-feature', methods=['POST'])
+def check_feature_access():
+    """Check if user has access to a specific feature"""
+    try:
+        data = request.get_json()
+        feature = data.get('feature')
+        
+        if not feature:
+            return jsonify({'error': 'Feature name is required'}), 400
+        
+        has_access = license_manager.has_feature_access(feature)
+        return jsonify({
+            'feature': feature,
+            'has_access': has_access,
+            'is_vip': license_manager.check_license_valid()
+        })
+    except Exception as e:
+        logger.error(f"Error checking feature access: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# FORCED ATTACK ENDPOINTS
+# ============================================================================
+
+@app.route('/api/attacks/forced', methods=['GET'])
+def get_forced_attack():
+    """Get the currently forced attack session"""
+    try:
+        forced_attack = bot.config.get('forced_attack_session', None)
+        return jsonify({'forced_attack': forced_attack})
+    except Exception as e:
+        logger.error(f"Error getting forced attack: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/attacks/forced', methods=['POST'])
+def set_forced_attack():
+    """Set or clear the forced attack session"""
+    try:
+        data = request.get_json()
+        forced_attack = data.get('forced_attack', None)
+        
+        # Save to config
+        bot.config.set('forced_attack_session', forced_attack)
+        
+        if forced_attack:
+            logger.info(f"⚡ FORCED ATTACK SET: '{forced_attack}'")
+            logger.info(f"📝 All automation (Auto Attack & Wall Upgrader) will use: {forced_attack}")
+            logger.info(f"💾 Saved to config.json as 'forced_attack_session': '{forced_attack}'")
+            return jsonify({
+                'success': True, 
+                'message': f'Forced attack set to {forced_attack}',
+                'forced_attack': forced_attack
+            })
+        else:
+            logger.info("🔓 Forced attack cleared - Rotation mode restored")
+            logger.info("🔄 Auto Attack and Wall Upgrader will now rotate through all recorded attacks")
+            return jsonify({
+                'success': True, 
+                'message': 'Forced attack cleared',
+                'forced_attack': None
+            })
+    except Exception as e:
+        logger.error(f"Error setting forced attack: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# ERROR HANDLERS
+# ============================================================================
+
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({'error': 'Endpoint not found'}), 404
+
+
+@app.errorhandler(500)
+def server_error(error):
+    logger.error(f"Server error: {error}")
+    return jsonify({'error': 'Internal server error'}), 500
+
+
+# PayPal Payment Endpoints
+@app.route('/api/payment/paypal/initiate', methods=['POST'])
+@rate_limit(payment_rate_limiter)
+def initiate_paypal_payment():
+    """Initiate a PayPal payment for subscription"""
+    try:
+        data = request.get_json()
+        plan_id = data.get('planId', '').lower()
+        price = data.get('price')
+        
+        # Validate input
+        if not input_validator.validate_plan_id(plan_id):
+            logger.warning(f"Invalid plan ID attempted: {plan_id}")
+            return jsonify({'error': 'Invalid plan ID'}), 400
+        
+        if not input_validator.validate_amount(price):
+            logger.warning(f"Invalid amount attempted: {price}")
+            return jsonify({'error': 'Invalid amount'}), 400
+        
+        # Get price from config
+        actual_price = paypal_config.get_price(plan_id)
+        if actual_price == 0:
+            actual_price = price
+        
+        # Get PayPal email and URLs
+        paypal_email = paypal_config.get_paypal_email()
+        if not paypal_email or paypal_email == 'your-paypal-email@example.com':
+            # Use actual PayPal email
+            paypal_email = 'ClashOfClansBOT2026@outlook.fr'
+            logger.info("Using PayPal email for payments")
+        
+        paypal_url = paypal_config.get_paypal_url()
+        return_url = paypal_config.config['return_url']
+        cancel_url = paypal_config.config['cancel_url']
+        product_name = paypal_config.get_product_name(plan_id)
+        invoice_id = f"FARMIFY-{plan_id.upper()}-{int(datetime.now().timestamp())}"
+        
+        # Log transaction as pending
+        transaction_logger.log_transaction(
+            invoice_id=invoice_id,
+            plan_id=plan_id,
+            amount=actual_price,
+            status='pending'
+        )
+        
+        # Build PayPal payment URL
+        payment_url = (
+            f"{paypal_url}?"
+            f"cmd=_xclick&"
+            f"business={paypal_email}&"
+            f"item_name={product_name}&"
+            f"amount={actual_price:.2f}&"
+            f"currency_code={paypal_config.config['currency_code']}&"
+            f"invoice={invoice_id}&"
+            f"return={return_url}&"
+            f"cancel_return={cancel_url}&"
+            f"notify_url={paypal_config.config['webhook_url']}"
+        )
+        
+        logger.info(f"✅ PayPal payment initiated - Plan: {plan_id}, Amount: ${actual_price}, Invoice: {invoice_id}")
+        
+        return jsonify({
+            'success': True,
+            'paymentUrl': payment_url,
+            'invoiceId': invoice_id,
+            'message': f'Redirecting to PayPal for ${actual_price} {plan_id} plan'
+        })
+    except Exception as e:
+        logger.error(f"❌ Error initiating PayPal payment: {e}")
+        return jsonify({'error': 'Failed to initiate payment'}), 500
+
+
+@app.route('/api/payment/paypal/success', methods=['GET'])
+def paypal_payment_success():
+    """Handle successful PayPal payment"""
+    try:
+        invoice_id = request.args.get('invoice')
+        transaction_id = request.args.get('tx')
+        
+        if not invoice_id or not transaction_id:
+            logger.warning("PayPal success callback missing required parameters")
+            return jsonify({
+                'success': False,
+                'message': 'Invalid payment parameters'
+            }), 400
+        
+        # Parse invoice ID to extract plan
+        # Format: FARMIFY-MONTHLY-1234567890
+        parts = invoice_id.split('-')
+        if len(parts) < 3:
+            return jsonify({'success': False, 'message': 'Invalid invoice format'}), 400
+        
+        plan_id = parts[1].lower()  # 'monthly' or 'yearly'
+        
+        # Update transaction with PayPal transaction ID
+        transaction_logger.update_transaction(invoice_id, {
+            'transaction_id': transaction_id,
+            'status': 'pending_verification'
+        })
+        
+        logger.info(f"PayPal payment success - Invoice: {invoice_id}, Transaction: {transaction_id}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Payment received! Verifying with PayPal...',
+            'invoiceId': invoice_id,
+            'transactionId': transaction_id
+        })
+    except Exception as e:
+        logger.error(f"Error processing PayPal success: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/payment/paypal/cancel', methods=['GET'])
+def paypal_payment_cancel():
+    """Handle cancelled PayPal payment"""
+    try:
+        invoice_id = request.args.get('invoice')
+        logger.info(f"PayPal payment cancelled - Invoice: {invoice_id}")
+        
+        return jsonify({
+            'success': False,
+            'message': 'Payment was cancelled. No charges were made.',
+            'invoiceId': invoice_id
+        })
+    except Exception as e:
+        logger.error(f"Error processing PayPal cancel: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/payment/paypal/webhook', methods=['POST'])
+def paypal_webhook():
+    """Handle PayPal IPN webhook for payment verification"""
+    try:
+        # Get the posted data
+        data = request.form.to_dict()
+        
+        logger.info(f"PayPal IPN received - Transaction ID: {data.get('txn_id')}")
+        
+        # Verify with PayPal
+        verified = verify_paypal_ipn(data)
+        
+        if not verified:
+            logger.warning(f"PayPal IPN verification failed for txn_id: {data.get('txn_id')}")
+            return jsonify({'success': False, 'message': 'IPN verification failed'}), 400
+        
+        logger.info(f"✅ PayPal IPN verified for transaction: {data.get('txn_id')}")
+        
+        # Handle different transaction types
+        txn_type = data.get('txn_type')
+        
+        if txn_type == 'web_accept' or txn_type == 'subscr_payment':
+            # Successful payment
+            handle_successful_payment(data)
+        elif txn_type == 'refund':
+            # Refund processed
+            handle_refund(data)
+        elif txn_type == 'subscr_cancel' or txn_type == 'subscr_eot':
+            # Subscription cancelled or ended
+            handle_subscription_cancel(data)
+        else:
+            logger.info(f"Unhandled IPN type: {txn_type}")
+        
+        return jsonify({'success': True}), 200
+    except Exception as e:
+        logger.error(f"Error processing PayPal webhook: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+def verify_paypal_ipn(data: dict) -> bool:
+    """Verify PayPal IPN signature"""
+    try:
+        # Prepare verification data
+        verify_data = {'cmd': '_notify-validate', **data}
+        
+        # Get PayPal verification URL based on mode
+        paypal_url = paypal_config.get_paypal_url()
+        
+        # Send verification request to PayPal
+        response = requests.post(paypal_url, data=verify_data, timeout=10)
+        
+        if response.text == 'VERIFIED':
+            logger.info("✅ PayPal IPN signature verified")
+            return True
+        else:
+            logger.warning(f"❌ PayPal IPN verification failed: {response.text}")
+            return False
+    except Exception as e:
+        logger.error(f"Error verifying PayPal IPN: {e}")
+        return False
+
+
+def handle_successful_payment(data: dict) -> None:
+    """Handle successful payment and activate license"""
+    try:
+        invoice_id = data.get('invoice')
+        transaction_id = data.get('txn_id')
+        receiver_email = data.get('receiver_email')
+        payer_email = data.get('payer_email')
+        mc_gross = float(data.get('mc_gross', 0))
+        
+        if not invoice_id:
+            logger.error("No invoice ID in PayPal IPN data")
+            return
+        
+        # Update transaction as verified
+        transaction_logger.mark_verified(invoice_id, transaction_id)
+        
+        # Extract plan from invoice
+        parts = invoice_id.split('-')
+        if len(parts) < 3:
+            logger.error(f"Invalid invoice format: {invoice_id}")
+            return
+        
+        plan_id = parts[1].lower()
+        
+        # Generate license key
+        license_key = license_manager.generate_license_key(plan_id)
+        
+        # Activate the license
+        activation_result = license_manager.activate_license(license_key, plan_id)
+        
+        if activation_result['success']:
+            logger.info(f"✅ License activated: {license_key}")
+            
+            # Update transaction with license key
+            transaction_logger.update_transaction(invoice_id, {
+                'status': 'verified',
+                'license_key': license_key,
+                'activated_at': datetime.now().isoformat()
+            })
+            
+            # Send confirmation email to user
+            email_notifier.send_payment_confirmation(
+                recipient_email=payer_email,
+                plan_id=plan_id,
+                amount=mc_gross,
+                invoice_id=invoice_id,
+                transaction_id=transaction_id
+            )
+            
+            # Send license activation email
+            license_status = license_manager.get_license_status()
+            expiry_date = license_status.get('expiry_date', 'Unknown')
+            
+            email_notifier.send_license_activation(
+                recipient_email=payer_email,
+                plan_id=plan_id,
+                license_key=license_key,
+                expiry_date=expiry_date
+            )
+            
+            logger.info(f"📧 Confirmation emails sent to {payer_email}")
+        else:
+            logger.error(f"Failed to activate license: {activation_result.get('error')}")
+            transaction_logger.mark_failed(invoice_id, "License activation failed")
+        
+    except Exception as e:
+        logger.error(f"Error handling successful payment: {e}")
+
+
+def handle_refund(data: dict) -> None:
+    """Handle refund notification"""
+    try:
+        parent_txn_id = data.get('parent_txn_id')
+        reason_code = data.get('reason_code', 'unknown')
+        mc_gross = data.get('mc_gross', 0)
+        payer_email = data.get('payer_email')
+        
+        # Find original transaction
+        original_transaction = transaction_logger.get_transaction_by_tx_id(parent_txn_id)
+        
+        if original_transaction:
+            invoice_id = original_transaction['invoice_id']
+            
+            # Mark as refunded
+            transaction_logger.mark_refunded(invoice_id, f"Refund reason: {reason_code}")
+            
+            # Deactivate license
+            license_manager.deactivate_license()
+            
+            logger.info(f"✅ License deactivated due to refund")
+            
+            # Send refund notification email
+            email_notifier.send_refund_notification(
+                recipient_email=payer_email,
+                invoice_id=invoice_id,
+                amount=float(mc_gross),
+                reason=reason_code
+            )
+            
+            logger.info(f"📧 Refund notification sent to {payer_email}")
+        else:
+            logger.warning(f"Refund received but no matching transaction found: {parent_txn_id}")
+    
+    except Exception as e:
+        logger.error(f"Error handling refund: {e}")
+
+
+def handle_subscription_cancel(data: dict) -> None:
+    """Handle subscription cancellation"""
+    try:
+        subscr_id = data.get('subscr_id')
+        payer_email = data.get('payer_email')
+        
+        logger.info(f"Subscription cancelled: {subscr_id}")
+        
+        # Deactivate license
+        license_manager.deactivate_license()
+        
+        logger.info(f"✅ License deactivated due to subscription cancellation")
+        
+        # Send notification
+        email_notifier.send_email_notification(
+            recipient_email=payer_email,
+            subject="Farmify Subscription Cancelled",
+            body=f"Your subscription {subscr_id} has been cancelled. Free plan features remain available."
+        )
+    
+    except Exception as e:
+        logger.error(f"Error handling subscription cancel: {e}")
+
+
+# Transaction Management Endpoints (Admin)
+@app.route('/api/payment/transactions', methods=['GET'])
+def get_transactions():
+    """Get transaction statistics (admin only)"""
+    try:
+        stats = transaction_logger.get_statistics()
+        return jsonify(stats)
+    except Exception as e:
+        logger.error(f"Error getting transactions: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/payment/transactions/all', methods=['GET'])
+def get_all_transactions():
+    """Get all transactions (admin only - should add auth in production)"""
+    try:
+        transactions = transaction_logger.get_all_transactions()
+        return jsonify({'transactions': transactions, 'count': len(transactions)})
+    except Exception as e:
+        logger.error(f"Error getting all transactions: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/payment/email-status', methods=['GET'])
+def get_email_status():
+    """Get email notifier status"""
+    try:
+        status = email_notifier.get_status()
+        return jsonify(status)
+    except Exception as e:
+        logger.error(f"Error getting email status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# MANUAL LICENSE ISSUANCE ENDPOINTS (Admin Use)
+# ============================================================================
+
+@app.route('/api/admin/issue-license', methods=['POST'])
+def issue_license_manual():
+    """
+    Manually issue a license key to a user
+    Request body: {
+        "email": "user@example.com",
+        "plan_id": "monthly" or "annual",
+        "send_email": true (optional, default: true)
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'success': False, 'error': 'No data provided'}), 400
+        
+        email = data.get('email', '').strip()
+        plan_id = data.get('plan_id', '').lower()
+        send_email = data.get('send_email', True)
+        
+        # Validate input
+        if not email or '@' not in email:
+            return jsonify({'success': False, 'error': 'Invalid email address'}), 400
+        
+        if plan_id not in ['monthly', 'annual']:
+            return jsonify({'success': False, 'error': 'Invalid plan_id. Use "monthly" or "annual"'}), 400
+        
+        logger.info(f"📝 Issuing manual license - Email: {email}, Plan: {plan_id}")
+        
+        # Generate license key
+        license_key = license_manager.generate_license_key(plan_id)
+        
+        # Activate the license
+        activation_result = license_manager.activate_license(license_key, plan_id)
+        
+        if not activation_result['success']:
+            logger.error(f"Failed to activate license: {activation_result.get('error')}")
+            return jsonify({
+                'success': False,
+                'error': f"Failed to activate license: {activation_result.get('error')}"
+            }), 500
+        
+        logger.info(f"✅ Manual license issued: {license_key}")
+        
+        # Log as manual issuance
+        transaction_data = {
+            'invoice_id': f"MANUAL-{plan_id.upper()}-{int(datetime.now().timestamp())}",
+            'transaction_id': f"MANUAL-{int(datetime.now().timestamp())}",
+            'plan_id': plan_id,
+            'amount': 0,  # Manual issuance, no payment
+            'status': 'verified',  # Already verified since manual
+            'email': email,
+            'hardware_id': 'N/A',
+            'license_key': license_key,
+            'notes': 'Manually issued by admin'
+        }
+        transaction_logger.log_transaction(transaction_data)
+        
+        # Send email if requested
+        if send_email:
+            license_status = license_manager.get_license_status()
+            expiry_date = license_status.get('expiry_date', 'Unknown')
+            
+            email_notifier.send_license_activation(
+                recipient_email=email,
+                plan_id=plan_id,
+                license_key=license_key,
+                expiry_date=expiry_date
+            )
+            logger.info(f"📧 License email sent to {email}")
+        
+        return jsonify({
+            'success': True,
+            'license_key': license_key,
+            'plan_id': plan_id,
+            'email': email,
+            'message': f'License issued successfully and email sent' if send_email else 'License issued successfully (no email sent)'
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error issuing manual license: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/licenses', methods=['GET'])
+def get_all_licenses():
+    """
+    Get all issued licenses (for admin dashboard)
+    Returns all transactions that have licenses
+    """
+    try:
+        transactions = transaction_logger.get_all_transactions()
+        
+        licenses = []
+        for tx in transactions:
+            if tx.get('license_key'):
+                licenses.append({
+                    'license_key': tx.get('license_key'),
+                    'email': tx.get('email'),
+                    'plan_id': tx.get('plan_id'),
+                    'status': tx.get('status'),
+                    'issued_at': tx.get('activated_at') or tx.get('timestamp'),
+                    'invoice_id': tx.get('invoice_id'),
+                    'transaction_id': tx.get('transaction_id')
+                })
+        
+        return jsonify({
+            'success': True,
+            'total': len(licenses),
+            'licenses': licenses
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error getting licenses: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/licenses/revoke', methods=['POST'])
+def revoke_license():
+    """
+    Revoke a previously issued license
+    Request body: {
+        "license_key": "FARM-MONTHLY-1234567890-ABC123",
+        "reason": "Refund requested" (optional)
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data or not data.get('license_key'):
+            return jsonify({'success': False, 'error': 'License key required'}), 400
+        
+        license_key = data.get('license_key')
+        reason = data.get('reason', 'Manual revocation')
+        
+        logger.info(f"🔴 Revoking license: {license_key} - Reason: {reason}")
+        
+        # Deactivate the license
+        license_manager.deactivate_license()
+        
+        # Update transaction
+        transaction_logger.mark_refunded(license_key, f"Revoked: {reason}")
+        
+        logger.info(f"✅ License revoked: {license_key}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'License {license_key} has been revoked'
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error revoking license: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+if __name__ == '__main__':
+    print("\n" + "=" * 80)
+    print("Farmify API SERVER")
+    print("=" * 80)
+    print(f"Running on: http://127.0.0.1:5000")
+    print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Log file: {logger.get_log_file_path()}")
+    print("=" * 80)
+    print("Server is ready! All logs will appear below:")
+    print("=" * 80)
+    print()
+    
+    logger.info("Farmify API Server starting...")
+    logger.info(f"Server address: http://127.0.0.1:5000")
+    logger.info(f"Log file: {logger.get_log_file_path()}")
+    
+    # Configure Flask to show logs in console
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    
+    # Run the Flask app with console logging enabled
+    app.run(host='127.0.0.1', port=5000, debug=True, use_reloader=False)
